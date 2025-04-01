@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>地铁线路规划教学工具 - 专业版</title>
+    <style>
+        #container {width:100%; height: 100vh;}
+        .control-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.9);
+            padding: 15px;
+            z-index: 999;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            border-radius: 8px;
+        }
+        button { margin: 5px; padding: 8px 12px; cursor: pointer; }
+        .line-color { width: 20px; height: 20px; display: inline-block; }
+        .line-info { margin: 5px 0; padding: 5px; background: #f5f5f5; }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<div class="control-panel">
+    <div>
+        <button onclick="newLine()">新建线路</button>
+        <button onclick="connectEnds()">首尾相连</button>
+        <button onclick="undo()">撤销</button>
+        <button onclick="calculateDistance()">计算长度</button>
+        <input type="color" id="lineColor" value="#1890ff">
+    </div>
+    <div id="lineSelector"></div>
+    <div id="distanceInfo"></div>
+    <div id="instruction">点击地图添加站点，右键删除站点</div>
+</div>
+
+<script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=1d76fbf211f5f0ad32e9a050d47fb31c"></script>
+<script>
+let map;
+let lines = [];
+let currentLineIndex = 0;
+let infoWindow = new AMap.InfoWindow({offset: new AMap.Pixel(0, -30)});
+
+// 无地铁城市列表（扩展版）
+const cities = [
+    {name: '泉州', center: [118.675676, 24.874178]},
+    {name: '洛阳', center: [112.454040, 34.619702]},
+    {name: '扬州', center: [119.412834, 32.394480]},
+    {name: '漳州', center: [117.647109, 24.513025]},
+    {name: '宜昌', center: [111.286395, 30.691967]}
+];
+
+function initMap() {
+    const city = cities[Math.floor(Math.random() * cities.length)];
+    map = new AMap.Map('container', {
+        resizeEnable: true,
+        center: city.center,
+        zoom: 13,
+        mapStyle: 'amap://styles/satellite'
+    });
+
+    map.on('click', addStation);
+    map.on('rightclick', deleteStation);
+    newLine(); // 初始化第一条线路
+}
+
+function newLine() {
+    const line = {
+        name: `线路 ${lines.length + 1}`,
+        color: document.getElementById('lineColor').value,
+        stations: [],
+        polyline: null,
+        markers: []
+    };
+    lines.push(line);
+    currentLineIndex = lines.length - 1;
+    updateLineSelector();
+    drawLine();
+}
+
+function addStation(e) {
+    const currentLine = lines[currentLineIndex];
+    const stationNumber = currentLine.stations.length + 1;
+    
+    const marker = new AMap.Marker({
+        position: e.lnglat,
+        content: `<div style="background:${currentLine.color};color:white;
+                  width:24px;height:24px;border-radius:50%;text-align:center;
+                  line-height:24px;box-shadow:0 2px 4px rgba(0,0,0,0.3)">
+                  ${stationNumber}</div>`
+    });
+
+    marker.on('click', () => {
+        infoWindow.setContent(`站点${stationNumber}<br>坐标: ${e.lnglat.toArray().map(v => v.toFixed(4)).join()}`);
+        infoWindow.open(map, marker.getPosition());
+    });
+
+    currentLine.stations.push({
+        id: stationNumber,
+        position: e.lnglat,
+        marker: marker
+    });
+
+    map.add(marker);
+    drawLine();
+    updateLineInfo();
+}
+
+function drawLine() {
+    const currentLine = lines[currentLineIndex];
+    if (currentLine.polyline) map.remove(currentLine.polyline);
+    
+    if (currentLine.stations.length >= 2) {
+        currentLine.polyline = new AMap.Polyline({
+            path: currentLine.stations.map(s => s.position),
+            strokeColor: currentLine.color,
+            strokeWeight: 5,
+            strokeOpacity: 0.8
+        });
+        map.add(currentLine.polyline);
+    }
+}
+
+function connectEnds() {
+    const currentLine = lines[currentLineIndex];
+    if (currentLine.stations.length >= 2) {
+        currentLine.stations.push({...currentLine.stations[0]});
+        drawLine();
+        updateLineInfo();
+    }
+}
+
+function deleteStation(e) {
+    const currentLine = lines[currentLineIndex];
+    if (currentLine.stations.length > 0) {
+        const lastStation = currentLine.stations.pop();
+        map.remove(lastStation.marker);
+        drawLine();
+        updateLineInfo();
+    }
+}
+
+function undo() {
+    const currentLine = lines[currentLineIndex];
+    if (currentLine.stations.length > 0) {
+        const lastStation = currentLine.stations.pop();
+        map.remove(lastStation.marker);
+        drawLine();
+        updateLineInfo();
+    }
+}
+
+function calculateDistance() {
+    const currentLine = lines[currentLineIndex];
+    let total = 0;
+    for (let i = 1; i < currentLine.stations.length; i++) {
+        total += currentLine.stations[i-1].position.distance(currentLine.stations[i].position);
+    }
+    document.getElementById('distanceInfo').innerHTML = 
+        `当前线路总长度: ${(total/1000).toFixed(2)}公里 站点数: ${currentLine.stations.length}`;
+}
+
+function updateLineSelector() {
+    const container = document.getElementById('lineSelector');
+    container.innerHTML = lines.map((line, index) => `
+        <div class="line-info" onclick="switchLine(${index})" 
+             style="border-left: 4px solid ${line.color};
+                    ${index === currentLineIndex ? 'background: #e6f7ff;' : ''}">
+            ${line.name} (${line.stations.length}站)
+            <button onclick="deleteLine(${index})">删除</button>
+        </div>
+    `).join('');
+}
+
+function switchLine(index) {
+    currentLineIndex = index;
+    map.remove(lines.flatMap(l => l.polyline ? [l.polyline] : []));
+    lines.forEach(line => {
+        if (line.polyline) map.add(line.polyline);
+    });
+    updateLineSelector();
+    calculateDistance();
+}
+
+function deleteLine(index) {
+    if (index < 0 || index >= lines.length) return;
+    
+    const deletedLine = lines.splice(index, 1)[0];
+    
+    // 删除所有站点标记
+    deletedLine.stations.forEach(station => {
+        map.remove(station.marker);
+    });
+    
+    // 删除线路轨迹
+    if (deletedLine.polyline) {
+        map.remove(deletedLine.polyline);
+    }
+    
+    // 自动切换当前线路
+    currentLineIndex = lines.length > 0 ? 
+        Math.min(currentLineIndex, lines.length - 1) : 
+        (newLine(), 0);
+    
+    updateLineSelector();
+    calculateDistance();
+}
+
+function updateLineInfo() {
+    calculateDistance();
+    const currentLine = lines[currentLineIndex];
+    currentLine.markers.forEach((marker, i) => {
+        marker.setContent(`<div style="background:${currentLine.color};
+            color:white;width:24px;height:24px;border-radius:50%;
+            text-align:center;line-height:24px;">${i+1}</div>`);
+    });
+}
+
+// 初始化地图
+initMap();
+</script>
+</body>
+</html>
